@@ -1,0 +1,100 @@
+version: '3.3'
+services:
+
+  #############
+  ## Brokers ##
+  #############
+  zookeeper:
+    image: wurstmeister/zookeeper
+    restart: always
+    hostname: zookeeper
+    ports:
+      - "2181:2181"
+  kafka:
+    image: wurstmeister/kafka
+    restart: always
+    hostname: kafka
+    ports:
+      - "9092"
+    environment:
+      KAFKA_ADVERTISED_HOST_NAME: kafka
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_CREATE_TOPICS: "prices-events:1:1,prices-aggregated:1:1"
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    depends_on:
+      - zookeeper
+
+  ##############
+  ## Services ##
+  ##############
+  server:
+    build:
+      context: .
+      dockerfile: ./dockerfiles/server/Dockerfile
+      target: base
+    volumes:
+      - ./src/server:/home/node/app/src
+      - ./configs/server/cert:/home/node/app/cert
+      - ./nodemon.json:/home/node/app/nodemon.json
+    expose:
+      - '7777'
+    ports:
+      - '7777:7777'
+    command: npm run dev
+    depends_on:
+      - kafka
+      - zookeeper
+    environment:
+      INTERNAL_KAFKA_ADDR: 'kafka:9092'
+      API_KEY: 'cede.link-4adacb6b75d274aa45322413301e52fc'
+      SSL_PASSPHRASE: 'cedelabs'
+
+  ###############
+  ## Producers ##
+  ###############
+  producers:
+    build:
+      context: .
+      dockerfile: ./dockerfiles/producers/Dockerfile
+      target: base
+    volumes:
+      - ./src/producers:/home/node/app/src
+      - ./nodemon.json:/home/node/app/nodemon.json
+    command: npm run dev
+    depends_on:
+      - kafka
+      - zookeeper
+    environment:
+      INTERNAL_KAFKA_ADDR: 'kafka:9092'
+
+  ###############
+  ## Streams ##
+  ###############
+  streams:
+    build:
+      context: .
+      dockerfile: ./dockerfiles/streams/Dockerfile
+      target: base
+    volumes:
+      - ./src/streams:/home/node/app/src
+      - ./nodemon.json:/home/node/app/nodemon.json
+    command: npm run dev
+    depends_on:
+      - kafka
+      - zookeeper
+    environment:
+      INTERNAL_KAFKA_ADDR: 'kafka:9092'
+      INTERNAL_QUESTDB_ADDR: 'questdb:9009'
+
+  ##############
+  ## Database ##
+  ##############
+  questdb:
+    image: questdb/questdb:latest
+    volumes:
+      - ./questdb_data:/root/.questdb/db
+    ports:
+      - "9000:9000"
+      - "8812:8812"
+      - "9009:9009"
